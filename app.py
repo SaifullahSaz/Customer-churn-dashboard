@@ -5,6 +5,10 @@ import plotly.express as px
 from utils import preprocess_data, load_model
 from supabase import create_client, Client
 
+# Checking 
+st.write("Supabase URL:", url)
+
+
 # --- Initialize Supabase ---
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
