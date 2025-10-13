@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.preprocessing import StandardScaler
+import pickle
 
 # Load the same scaler used during training
 scaler = StandardScaler()
@@ -40,6 +41,17 @@ def preprocess_data(df):
 #     return joblib.load("best_model.pkl")
 
 # Load both model and feature list
+    # model, feature_list = joblib.load("best_model.pkl")
+    # return model, feature_list
+
 def load_model():
-    model, feature_list = joblib.load("best_model.pkl")
-    return model, feature_list
+    try:
+        with open("models/best_model.pkl", "rb") as file:
+            model_data = pickle.load(file)
+        model = model_data["model"]
+        feature_list = model_data["features"]
+        return model, feature_list
+    except Exception as e:
+        raise Exception(f"Error loading model: {e}")
+
+
