@@ -14,8 +14,6 @@ supabase: Client = create_client(url, key)
 # Checking 
 st.write("Supabase URL:", url)
 
-
-
 # --- Load Model ---
 model = load_model()
 
@@ -34,8 +32,17 @@ if uploaded_file:
     st.subheader("🔍 Raw Data Preview")
     st.dataframe(df.head())
 
+    # Load model and feature list
+    model, feature_list = load_model()
+
     # Preprocess
     processed_df = preprocess_data(df)
+
+    # Align columns to match training
+    for col in feature_list:
+        if col not in processed_df.columns:
+            processed_df[col] = 0  # add missing columns
+    processed_df = processed_df[feature_list]  # same order
 
     # Predict
     predictions = model.predict(processed_df)

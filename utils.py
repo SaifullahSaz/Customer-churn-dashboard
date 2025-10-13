@@ -35,6 +35,11 @@ def preprocess_data(df):
     df.fillna(0, inplace=True)
     return df
 
+# def load_model():
+#     """Loads the trained ML model."""
+#     return joblib.load("best_model.pkl")
+
+# Load both model and feature list
 def load_model():
-    """Loads the trained ML model."""
-    return joblib.load("best_model.pkl")
+    model, feature_list = joblib.load("best_model.pkl")
+    return model, feature_list
