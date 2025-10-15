@@ -6,3 +6,4 @@ xgboost
 plotly
 supabase
 joblib
+matplotlib 
