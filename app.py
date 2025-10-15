@@ -44,9 +44,13 @@ if uploaded_file:
             processed_df[col] = 0  # add missing columns
     processed_df = processed_df[feature_list]  # same order
 
-    # Predict
-    predictions = model.predict(processed_df)
-    df['Predicted_Churn'] = predictions
+    # After preprocessing uploaded data:
+    pred_probs = model.predict_proba(processed_df)[:, 1]  # probability of churn
+    df["Churn_Probability"] = pred_probs
+
+    # Optional threshold for reference
+    df["Churn_Binary"] = (df["Churn_Probability"] >= 0.5).astype(int)
+    df["Predicted_Churn"] = df["Churn_Binary"].map({0: "No Churn", 1: "Churn"})
 
     # Display results
     st.subheader("📈 Prediction Summary")
@@ -61,12 +65,33 @@ if uploaded_file:
     )
     st.plotly_chart(fig)
 
-    # Save to Supabase
+   # Save to Supabase
     st.subheader("💾 Save results to Supabase?")
     if st.button("Upload Predictions"):
-        data_to_upload = df.to_dict(orient="records")
-        supabase.table("predictions").insert(data_to_upload).execute()
-        st.success("✅ Predictions uploaded to Supabase!")
+        # Ensure model produces churn probabilities
+        try:
+            churn_probabilities = model.predict_proba(processed_df)[:, 1]  # probability of churn = class 1
+            df["Churn_Probability"] = churn_probabilities
+        except Exception as e:
+            st.error(f"⚠️ Could not compute churn probabilities: {e}")
+            st.stop()
+
+        # Map only relevant columns for Supabase upload
+        data_to_upload = []
+        for _, row in df.iterrows():
+            record = {
+                "customer_id": str(row.get("customerID", "")),  # adjust column name if different
+                "predicted_churn": float(row.get("Churn_Probability", 0.0)),  # now probabilistic
+                "monthly_charges": float(row.get("MonthlyCharges", 0.0)),
+                "tenure": int(row.get("tenure", 0)),
+            }
+            data_to_upload.append(record)
+
+        try:
+            supabase.table("predictions").insert(data_to_upload).execute()
+            st.success("✅ Probabilistic churn predictions uploaded to Supabase!")
+        except Exception as e:
+            st.error(f"⚠️ Supabase upload failed: {e}")
 
     # Optional analysis
     st.subheader("📊 Key Insights")
@@ -74,3 +99,16 @@ if uploaded_file:
         st.write("Monthly Charges vs Predicted Churn:")
         fig2 = px.histogram(df, x="MonthlyCharges", color="Predicted_Churn", barmode="group")
         st.plotly_chart(fig2)
+
+    import matplotlib.pyplot as plt
+
+    st.subheader("📈 Churn Probability Distribution")
+    fig, ax = plt.subplots()
+    ax.hist(df["Churn_Probability"], bins=20, color="skyblue", edgecolor="black")
+    ax.set_xlabel("Predicted Churn Probability")
+    ax.set_ylabel("Number of Customers")
+    st.pyplot(fig)
+
+    st.subheader("⚠️ Top At-Risk Customers")
+    st.dataframe(df.sort_values("Churn_Probability", ascending=False).head(10))
+
