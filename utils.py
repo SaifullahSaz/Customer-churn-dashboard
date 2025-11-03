@@ -54,4 +54,48 @@ def load_model():
     except Exception as e:
         raise Exception(f"Error loading model: {e}")
 
+def predict_df(df, model=None):
+    """Take an input dataframe (raw uploaded), preprocess, align features with the
+    training feature list, run the model and return the original dataframe with
+    added columns: 'Churn_Probability', 'Churn_Binary', 'Predicted_Churn'.
+
+    Note: this function will call `load_model()` to obtain both the model and
+    the expected `feature_list` saved at training time.
+    """
+    # Keep a copy of original dataframe so we don't remove identifying cols like customerID
+    original = df.copy()
+
+    # Load model and expected features
+    try:
+        model_obj, feature_list = load_model()
+    except Exception as e:
+        raise
+
+    # Preprocess a copy for prediction (preprocess_data may drop customerID)
+    processed = preprocess_data(df.copy())
+
+    # Ensure all expected features exist; add missing with zeros
+    for col in feature_list:
+        if col not in processed.columns:
+            processed[col] = 0
+
+    # Reorder columns to match training
+    processed = processed[feature_list]
+
+    # Predict probabilities (try predict_proba, fall back to predict)
+    try:
+        probs = model_obj.predict_proba(processed)[:, 1]
+    except Exception:
+        # Not all models implement predict_proba; fall back to predict
+        preds = model_obj.predict(processed)
+        # If predictions are 0/1 class labels, map them to 0/1 probabilities
+        probs = preds.astype(float)
+
+    # Attach predictions to the original dataframe
+    original["Churn_Probability"] = probs
+    original["Churn_Binary"] = (original["Churn_Probability"] >= 0.5).astype(int)
+    original["Predicted_Churn"] = original["Churn_Binary"].map({0: "No Churn", 1: "Churn"})
+
+    return original
+
 
