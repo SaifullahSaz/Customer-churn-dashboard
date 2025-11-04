@@ -4,6 +4,13 @@ import joblib
 import pickle
 from sklearn.preprocessing import StandardScaler
 import warnings
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    # Basic configuration if the consuming app hasn't configured logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Module-level cache for loaded artifacts
 MODEL = None
@@ -27,17 +34,21 @@ def _load_artifacts():
             data = pickle.load(f)
     except Exception as e:
         # propagate as a clear error
+        logger.exception("Failed to load model artifacts")
         raise Exception(f"Could not load '{p}': {e}")
 
     if isinstance(data, dict):
         MODEL = data.get("model") or data.get("estimator") or data.get("pipeline")
         FEATURE_LIST = data.get("features") or data.get("feature_list")
         SCALER = data.get("scaler") or data.get("preprocessor")
+        logger.info("Loaded artifacts from %s: model=%s, features=%s, scaler=%s", p, type(MODEL).__name__ if MODEL is not None else None, 'present' if FEATURE_LIST else None, 'present' if SCALER else None)
     else:
         # Unknown structure: try best-effort
         MODEL = data
         FEATURE_LIST = None
         SCALER = None
+
+    logger.debug("Artifact load complete: MODEL=%s FEATURE_LIST=%s SCALER=%s", type(MODEL).__name__ if MODEL is not None else None, FEATURE_LIST if FEATURE_LIST is not None else None, type(SCALER).__name__ if SCALER is not None else None)
 
     return MODEL, FEATURE_LIST, SCALER
 

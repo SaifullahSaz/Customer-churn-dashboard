@@ -2,21 +2,61 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from supabase import create_client, Client
-from utils import predict_df
+from utils import predict_df, load_model
 
 st.title("📥 Upload & Predict — Churn")
 
+# Configuration
+MAX_UPLOAD_MB = 5
+REQUIRED_COLUMNS = ["tenure", "MonthlyCharges", "TotalCharges"]
+
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
+def _validate_uploaded_file(uploaded):
+    # size check (Streamlit's UploadedFile has size in bytes)
+    try:
+        size = uploaded.size
+    except Exception:
+        size = None
+    if size and size > MAX_UPLOAD_MB * 1024 * 1024:
+        return False, f"File too large ({size/1024/1024:.1f} MB). Max allowed is {MAX_UPLOAD_MB} MB." 
+    return True, None
+
+
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    ok, msg = _validate_uploaded_file(uploaded_file)
+    if not ok:
+        st.error(msg)
+        st.stop()
+
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Could not read CSV: {e}")
+        st.stop()
+
     st.success("File uploaded successfully!")
     st.subheader("Raw Data Preview")
     st.dataframe(df.head())
 
+    # Check model availability and feature expectations
+    try:
+        model_obj, feature_list = load_model()
+    except Exception as e:
+        st.error(f"Model artifacts not available: {e}")
+        st.stop()
+
+    # Basic required column check (best-effort). If feature_list is available we trust alignment logic,
+    # but we still ensure key raw columns exist to avoid obvious errors.
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        st.error(f"Uploaded CSV is missing required columns: {missing}. Please include these columns and re-upload.")
+        st.stop()
+
     # Run prediction (utils.predict_df will load model and align features)
     try:
-        results = predict_df(df)
+        with st.spinner("Running predictions..."):
+            results = predict_df(df)
     except Exception as e:
         st.error(f"Prediction failed: {e}")
         st.stop()
