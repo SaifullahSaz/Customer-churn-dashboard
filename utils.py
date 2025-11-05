@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import pickle
+import re
 from sklearn.preprocessing import StandardScaler
 import warnings
 import logging
@@ -154,5 +155,78 @@ def predict_df(df, model=None):
     original["Predicted_Churn"] = original["Churn_Binary"].map({0: "No Churn", 1: "Churn"})
 
     return original
+
+
+def load_metrics_from_notebook(nb_path="model_training.ipynb"):
+    """Try to extract the printed metrics table from the training notebook.
+
+    This is a best-effort parser: it reads the notebook as text and looks for
+    lines containing model names and five numeric columns: Accuracy, Precision,
+    Recall, F1, ROC-AUC. Returns a pandas.DataFrame if any rows are found,
+    """
+    try:
+        with open(nb_path, "r", encoding="utf-8") as f:
+            txt = f.read()
+    except FileNotFoundError:
+        logger.info("Notebook %s not found, cannot extract metrics.", nb_path)
+        return None
+
+    # Regex to find lines like: "Logistic Regression  0.792883   0.595016  0.542614  0.567608  0.846356"
+    pattern = re.compile(r"^(?P<model>[A-Za-z0-9 _\-]+?)\s+(?P<accuracy>\d+\.\d+)\s+(?P<precision>\d+\.\d+)\s+(?P<recall>\d+\.\d+)\s+(?P<f1>\d+\.\d+)\s+(?P<roc_auc>\d+\.\d+)", re.MULTILINE)
+
+    rows = []
+    # First attempt: search the raw notebook JSON text (covers some notebooks that contain outputs inline)
+    for m in pattern.finditer(txt):
+        rows.append({
+            "Model": m.group("model").strip(),
+            "Accuracy": float(m.group("accuracy")),
+            "Precision": float(m.group("precision")),
+            "Recall": float(m.group("recall")),
+            "F1": float(m.group("f1")),
+            "ROC-AUC": float(m.group("roc_auc")),
+        })
+
+    # Second attempt: if no rows found, parse the notebook JSON and look into cell outputs
+    if not rows:
+        try:
+            import json
+
+            with open(nb_path, "r", encoding="utf-8") as f:
+                nb = json.load(f)
+
+            for cell in nb.get("cells", []):
+                for output in cell.get("outputs", []) or []:
+                    # outputs may have 'text' or 'data' with 'text/plain'
+                    text = None
+                    if output.get("output_type") == "stream":
+                        text = "".join(output.get("text") or [])
+                    else:
+                        data = output.get("data") or {}
+                        text = data.get("text/plain") or data.get("text") or None
+                        if isinstance(text, list):
+                            text = "".join(text)
+
+                    if not text:
+                        continue
+
+                    for m in pattern.finditer(text):
+                        rows.append({
+                            "Model": m.group("model").strip(),
+                            "Accuracy": float(m.group("accuracy")),
+                            "Precision": float(m.group("precision")),
+                            "Recall": float(m.group("recall")),
+                            "F1": float(m.group("f1")),
+                            "ROC-AUC": float(m.group("roc_auc")),
+                        })
+        except Exception:
+            logger.exception("Failed to parse notebook outputs for metrics")
+
+    if not rows:
+        logger.info("No metrics rows found in %s", nb_path)
+        return None
+
+    df = pd.DataFrame(rows)
+    # If the notebook printed the models in a certain order, preserve it.
+    return df
 
 
