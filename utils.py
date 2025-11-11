@@ -6,6 +6,94 @@ import re
 from sklearn.preprocessing import StandardScaler
 import warnings
 import logging
+from supabase import create_client
+import streamlit as st
+import time
+
+# Initialize Supabase client
+def _get_supabase_client():
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
+@st.cache_data(ttl=60*5)  # cache 5 minutes; adjust as needed
+def fetch_table_from_supabase(table_name: str, filters: dict | None = None, limit: int = 1000):
+    """
+    Fetch rows from a Supabase table into a pandas DataFrame.
+    - table_name: table to query
+    - filters: dict of column->value for equality filters (simple)
+    - limit: page size for each request (use moderate default)
+    Returns pandas.DataFrame.
+    """
+    supabase = _get_supabase_client()
+
+    rows = []
+    start = 0
+    page_size = limit
+
+    while True:
+        query = supabase.table(table_name).select("*").range(start, start + page_size - 1)
+        # apply simple equality filters
+        if filters:
+            for col, val in filters.items():
+                if val is None:
+                    continue
+                query = query.eq(col, val)
+
+        result = query.execute()
+        # Newer versions of the Supabase/PostgREST client may return different
+        # response shapes. Be defensive: check for an 'error' attribute, then
+        # fall back to status_code checks and include data in the message.
+        err = getattr(result, "error", None)
+        status = getattr(result, "status_code", None)
+        if err or (status is not None and int(status) >= 400):
+            if err:
+                msg = getattr(err, "message", str(err))
+            else:
+                # Try to include useful response body
+                body = getattr(result, "data", None)
+                msg = str(body) if body is not None else f"status_code={status}"
+            raise Exception(f"Supabase query failed: {msg}")
+
+        page_data = result.data or []
+        rows.extend(page_data)
+        if len(page_data) < page_size:
+            break
+        start += page_size
+        # small delay to be polite with rate limits
+        time.sleep(0.1)
+
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    # Optional: normalize JSON/JSONB columns if any (expand nested dicts)
+    # df = pd.json_normalize(rows)
+    return df
+
+
+def upsert_predictions_to_supabase(table_name: str, df: pd.DataFrame, key_col: str = "customerID"):
+    """Upsert prediction rows back to Supabase in chunks.
+
+    df should contain the key_col to use for upsert conflict detection.
+    """
+    supabase = _get_supabase_client()
+    records = df.to_dict(orient="records")
+    chunk_size = 500
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i : i + chunk_size]
+        res = supabase.table(table_name).upsert(chunk, on_conflict=key_col).execute()
+        # Defensive response handling — don't assume `.error` exists on the
+        # returned object. Check for error/status_code and include response
+        # data for diagnostics.
+        rerr = getattr(res, "error", None)
+        rstatus = getattr(res, "status_code", None)
+        if rerr or (rstatus is not None and int(rstatus) >= 400):
+            if rerr:
+                msg = getattr(rerr, "message", str(rerr))
+            else:
+                body = getattr(res, "data", None)
+                msg = str(body) if body is not None else f"status_code={rstatus}"
+            raise Exception(f"Supabase upsert failed: {msg}")
 
 # Configure module logger
 logger = logging.getLogger(__name__)
